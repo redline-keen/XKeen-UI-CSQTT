@@ -1,4 +1,3 @@
-sh -c '$(wget -qO- https://raw.githubusercontent.com/redline-keen/XKeen-UI-CSQTT/main/install.sh 2>/dev/null || cat << "EOF"
 #!/bin/sh
 set -e
 
@@ -23,9 +22,9 @@ case "$ARCH" in
         ;;
 esac
 
-# 2. Настройка путей и загрузка бинарника
+# 2. Настройка путей и загрузка бинарника в /opt/sbin
 URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
-INSTALL_DIR="/opt/usr/bin"
+INSTALL_DIR="/opt/sbin"
 TARGET_BIN="$INSTALL_DIR/xkeen-ui"
 
 echo "[+] Скачивание бинарного файла для архитектуры ($BIN_ARCH)..."
@@ -48,7 +47,7 @@ cat << 'INITEOT' > "$INIT_SCRIPT"
 #!/bin/sh
 
 ENABLED=yes
-PROG=/opt/usr/bin/xkeen-ui
+PROG=/opt/sbin/xkeen-ui
 ARGS=""
 PREARGS=""
 DESC=$PROG
@@ -64,9 +63,9 @@ echo "[+] Запуск XKeen-UI..."
 "$INIT_SCRIPT" restart >/dev/null 2>&1 || "$TARGET_BIN" &
 
 # 5. Определение IP роутера и вывод информации
-ROUTER_IP=$(ip addr show br0 2>/dev/null | grep -oE 'inet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2 | cut -d'/' -f1)
+ROUTER_IP=$(ip addr show br0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
 if [ -z "$ROUTER_IP" ]; then
-    ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}')
+    ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -n1)
 fi
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP="192.168.1.1"
@@ -82,5 +81,3 @@ echo "  Веб-интерфейс доступен по адресу:"
 echo "  http://${ROUTER_IP}:${PORT}"
 echo "=================================================="
 echo ""
-EOF
-)'
