@@ -46,21 +46,32 @@ echo "[+] Настройка автозапуска ($INIT_SCRIPT)..."
 cat << 'INITEOT' > "$INIT_SCRIPT"
 #!/bin/sh
 
-ENABLED=yes
-PROG=/opt/sbin/xkeen-ui
-ARGS=""
-PREARGS=""
-DESC=$PROG
-PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-. /opt/etc/init.d/rc.func
+case "$1" in
+    start)
+        if ! pidof xkeen-ui >/dev/null; then
+            nohup /opt/sbin/xkeen-ui >/dev/null 2>&1 &
+        fi
+        ;;
+    stop)
+        killall xkeen-ui 2>/dev/null
+        ;;
+    restart)
+        $0 stop
+        sleep 1
+        $0 start
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
 INITEOT
 
 chmod +x "$INIT_SCRIPT"
 
 # 4. Запуск утилиты
 echo "[+] Запуск XKeen-UI..."
-"$INIT_SCRIPT" restart >/dev/null 2>&1 || "$TARGET_BIN" &
+"$INIT_SCRIPT" restart >/dev/null 2>&1
 
 # 5. Определение IP роутера и вывод информации
 ROUTER_IP=$(ip addr show br0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
