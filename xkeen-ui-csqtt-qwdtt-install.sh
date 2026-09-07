@@ -64,7 +64,7 @@ echo "[+] Запуск XKeen-UI..."
 "$INIT_SCRIPT" restart >/dev/null 2>&1 || "$TARGET_BIN" &
 
 # 5. Определение IP роутера и вывод информации
-ROUTER_IP=$(ip addr show br0 2>/dev/null | grep -oE 'inet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2)
+ROUTER_IP=$(ip addr show br0 2>/dev/null | grep -oE 'inet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2 | cut -d'/' -f1)
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}')
 fi
@@ -72,7 +72,7 @@ if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP="192.168.1.1"
 fi
 
-PORT=8080 # Замените порт, если веб-интерфейс XKeen-UI использует другой
+PORT=1000
 
 echo ""
 echo "=================================================="
