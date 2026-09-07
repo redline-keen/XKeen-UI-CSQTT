@@ -1,10 +1,10 @@
 #!/bin/sh
 set -e
 
-# 0. Остановка процесса и очистка старой установки
+# 0. Принудительная остановка процесса и очистка
 echo "[+] Остановка и очистка предыдущей установки..."
 killall -9 xkeen-ui 2>/dev/null || true
-rm -f /opt/sbin/xkeen-ui /opt/etc/init.d/S99xkeen-ui
+rm -f /opt/sbin/xkeen-ui /opt/sbin/xkeen-ui.tmp /opt/etc/init.d/S99xkeen-ui
 
 # 1. Определение архитектуры процессора
 ARCH=$(uname -m)
@@ -27,15 +27,14 @@ case "$ARCH" in
         ;;
 esac
 
-# 2. Скачивание во временный файл и перемещение в /opt/sbin
+# 2. Скачивание сразу в /opt/sbin (в обход /tmp)
 URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
 INSTALL_DIR="/opt/sbin"
 TARGET_BIN="$INSTALL_DIR/xkeen-ui"
-TMP_BIN="/tmp/xkeen-ui-download"
+TMP_BIN="$INSTALL_DIR/xkeen-ui.tmp"
 
 echo "[+] Скачивание бинарного файла для архитектуры ($BIN_ARCH)..."
 mkdir -p "$INSTALL_DIR"
-rm -f "$TMP_BIN"
 
 curl -sSL "$URL" -o "$TMP_BIN"
 
