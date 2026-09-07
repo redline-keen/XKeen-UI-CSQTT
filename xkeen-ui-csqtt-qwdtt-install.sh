@@ -1,9 +1,9 @@
 #!/bin/sh
 set -e
 
-# 0. Удаление предыдущей установки и остановка процесса
-echo "[+] Удаление предыдущей установки..."
-killall xkeen-ui 2>/dev/null || true
+# 0. Остановка процесса и очистка старой установки
+echo "[+] Остановка и очистка предыдущей установки..."
+killall -9 xkeen-ui 2>/dev/null || true
 rm -f /opt/sbin/xkeen-ui /opt/etc/init.d/S99xkeen-ui
 
 # 1. Определение архитектуры процессора
@@ -27,21 +27,25 @@ case "$ARCH" in
         ;;
 esac
 
-# 2. Настройка путей и загрузка бинарника в /opt/sbin
+# 2. Скачивание во временный файл и перемещение в /opt/sbin
 URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
 INSTALL_DIR="/opt/sbin"
 TARGET_BIN="$INSTALL_DIR/xkeen-ui"
+TMP_BIN="/tmp/xkeen-ui-download"
 
 echo "[+] Скачивание бинарного файла для архитектуры ($BIN_ARCH)..."
 mkdir -p "$INSTALL_DIR"
-curl -sSL "$URL" -o "$TARGET_BIN"
+rm -f "$TMP_BIN"
 
-if [ ! -s "$TARGET_BIN" ]; then
+curl -sSL "$URL" -o "$TMP_BIN"
+
+if [ ! -s "$TMP_BIN" ]; then
     echo "[!] Ошибка: Не удалось скачать файл или скачанный файл пуст."
-    rm -f "$TARGET_BIN"
+    rm -f "$TMP_BIN"
     exit 1
 fi
 
+mv "$TMP_BIN" "$TARGET_BIN"
 chmod +x "$TARGET_BIN"
 
 # 3. Создание скрипта автозапуска в Entware
@@ -58,7 +62,7 @@ case "$1" in
         fi
         ;;
     stop)
-        killall xkeen-ui 2>/dev/null
+        killall -9 xkeen-ui 2>/dev/null
         ;;
     restart)
         $0 stop
