@@ -2,21 +2,7 @@ sh -c '$(wget -qO- https://raw.githubusercontent.com/redline-keen/XKeen-UI-CSQTT
 #!/bin/sh
 set -e
 
-# 1. Проверка наличия Entware (/opt)
-if [ ! -d "/opt/bin" ] && [ ! -d "/opt/usr/bin" ]; then
-    echo "[!] Ошибка: Entware не установлен на роутере."
-    echo "[!] Установите Entware через компоненты Keenetic перед продолжением."
-    exit 1
-fi
-
-# 2. Обновление пакетов и установка curl, если его нет
-if ! command -v curl >/dev/null 2>&1; then
-    echo "[+] curl не найден. Обновляем списки пакетов и устанавливаем curl..."
-    opkg update
-    opkg install curl ca-certificates
-fi
-
-# 3. Определение архитектуры процессора
+# 1. Определение архитектуры процессора
 ARCH=$(uname -m)
 case "$ARCH" in
     mips|mipsel)
@@ -37,31 +23,64 @@ case "$ARCH" in
         ;;
 esac
 
-# 4. Настройка путей и загрузка
-URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-1.0-${BIN_ARCH}.tar.gz"
-TMP_DIR="/tmp/xkeen-ui-install"
-INSTALL_DIR="/opt/etc/xkeen-ui"
+# 2. Настройка путей и загрузка бинарника
+URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
+INSTALL_DIR="/opt/usr/bin"
+TARGET_BIN="$INSTALL_DIR/xkeen-ui"
 
-echo "[+] Скачивание релиза для архитектуры ($BIN_ARCH)..."
-mkdir -p "$TMP_DIR"
-curl -sSL "$URL" -o "$TMP_DIR/xkeen-ui.tar.gz"
+echo "[+] Скачивание бинарного файла для архитектуры ($BIN_ARCH)..."
+mkdir -p "$INSTALL_DIR"
+curl -sSL "$URL" -o "$TARGET_BIN"
 
-if [ ! -s "$TMP_DIR/xkeen-ui.tar.gz" ]; then
-    echo "[!] Ошибка: Не удалось скачать файл или архив пуст."
-    rm -rf "$TMP_DIR"
+if [ ! -s "$TARGET_BIN" ]; then
+    echo "[!] Ошибка: Не удалось скачать файл или скачанный файл пуст."
+    rm -f "$TARGET_BIN"
     exit 1
 fi
 
-# 5. Распаковка и установка
-echo "[+] Распаковка архива..."
-mkdir -p "$INSTALL_DIR"
-tar -xzf "$TMP_DIR/xkeen-ui.tar.gz" -C "$INSTALL_DIR"
-chmod +x "$INSTALL_DIR/xkeen-ui" "$INSTALL_DIR/scripts/"*.sh 2>/dev/null || chmod +x "$INSTALL_DIR/"*
+chmod +x "$TARGET_BIN"
 
-# 6. Очистка временных файлов
-rm -rf "$TMP_DIR"
+# 3. Создание скрипта автозапуска в Entware
+INIT_SCRIPT="/opt/etc/init.d/S99xkeen-ui"
+echo "[+] Настройка автозапуска ($INIT_SCRIPT)..."
 
-echo "[✓] Установка завершена!"
-echo "[i] Запустить бинарник можно командой: $INSTALL_DIR/xkeen-ui"
+cat << 'INITEOT' > "$INIT_SCRIPT"
+#!/bin/sh
+
+ENABLED=yes
+PROG=/opt/usr/bin/xkeen-ui
+ARGS=""
+PREARGS=""
+DESC=$PROG
+PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func
+INITEOT
+
+chmod +x "$INIT_SCRIPT"
+
+# 4. Запуск утилиты
+echo "[+] Запуск XKeen-UI..."
+"$INIT_SCRIPT" restart >/dev/null 2>&1 || "$TARGET_BIN" &
+
+# 5. Определение IP роутера и вывод информации
+ROUTER_IP=$(ip addr show br0 2>/dev/null | grep -oE 'inet [0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | cut -d' ' -f2)
+if [ -z "$ROUTER_IP" ]; then
+    ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}')
+fi
+if [ -z "$ROUTER_IP" ]; then
+    ROUTER_IP="192.168.1.1"
+fi
+
+PORT=8080 # Замените порт, если веб-интерфейс XKeen-UI использует другой
+
+echo ""
+echo "=================================================="
+echo "  [✓] Установка и запуск успешно завершены!"
+echo "=================================================="
+echo "  Веб-интерфейс доступен по адресу:"
+echo "  http://${ROUTER_IP}:${PORT}"
+echo "=================================================="
+echo ""
 EOF
 )'
