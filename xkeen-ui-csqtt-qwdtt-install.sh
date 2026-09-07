@@ -1,6 +1,11 @@
 #!/bin/sh
 set -e
 
+# 0. Удаление предыдущей установки и остановка процесса
+echo "[+] Удаление предыдущей установки..."
+killall xkeen-ui 2>/dev/null || true
+rm -f /opt/sbin/xkeen-ui /opt/etc/init.d/S99xkeen-ui
+
 # 1. Определение архитектуры процессора
 ARCH=$(uname -m)
 case "$ARCH" in
