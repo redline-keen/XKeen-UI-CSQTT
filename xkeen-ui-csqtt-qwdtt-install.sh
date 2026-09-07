@@ -1,97 +1,164 @@
 #!/bin/sh
-set -e
+# XKeen-UI CSQTT edition — одноразовый установщик для Keenetic (Entware)
+# Использование: curl -kLs https://raw.githubusercontent.com/redline-keen/XKeen-UI-CSQTT/main/install-xkeen-ui.sh | sh
+#  или: opkg update && opkg install curl && curl ... | sh
+# Скрипт: скачивает бинарь с GitHub → /opt/sbin/xkeen-ui, создаёт автозапуск
+# S99xkeen-ui, запускает панель и печатает кликабельный адрес.
 
-# 0. Остановка процесса и очистка предыдущей установки
-echo "[+] Остановка и очистка предыдущей установки..."
-if [ -f /opt/etc/init.d/S99xkeen-ui ]; then
-    /opt/etc/init.d/S99xkeen-ui stop >/dev/null 2>&1 || true
-fi
-killall -9 xkeen-ui 2>/dev/null || true
-rm -f /opt/sbin/xkeen-ui /opt/sbin/xkeen-ui.tmp /opt/etc/init.d/S99xkeen-ui
+# Цвета через printf: $'...' — не POSIX и не работает в dash
+GREEN=$(printf '\033[32m')
+GREEN_BOLD=$(printf '\033[1;32m')
+RED=$(printf '\033[31m')
+RED_BOLD=$(printf '\033[1;31m')
+NC=$(printf '\033[0m')
+NCN="$NC\n\n"
+YELLOW=$(printf '\033[1;33m')
+CYAN=$(printf '\033[1;96m')
 
-# 1. Определение архитектуры процессора
-ARCH=$(uname -m)
-case "$ARCH" in
-    mips|mipsel)
-        BIN_ARCH="mipsle"
-        ;;
-    aarch64|arm64)
-        BIN_ARCH="arm64"
-        ;;
-    armv7l|arm)
-        BIN_ARCH="armv7"
-        ;;
-    x86_64)
-        BIN_ARCH="amd64"
-        ;;
-    *)
-        echo "[!] Неподдерживаемая архитектура: $ARCH"
-        exit 1
-        ;;
-esac
+ERROR="\n${RED} ❌${RED_BOLD}"
+SUCCESS="\n${GREEN} ✅${GREEN_BOLD}"
+INFO="${CYAN} ℹ️ ${NC}"
 
-# 2. Загрузка бинарника в /opt/sbin
-URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
-INSTALL_DIR="/opt/sbin"
-TARGET_BIN="$INSTALL_DIR/xkeen-ui"
-TMP_BIN="$INSTALL_DIR/xkeen-ui.tmp"
+BIN_URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-arm64"
+XKEENUI_BIN="/opt/sbin/xkeen-ui"
+XKEENUI_INIT="/opt/etc/init.d/S99xkeen-ui"
+PORT="1000"
 
-echo "[+] Скачивание бинарного файла для архитектуры ($BIN_ARCH)..."
-mkdir -p "$INSTALL_DIR"
+spinner() {
+  pid=$1; msg=$2
+  trap 'kill "$pid" 2>/dev/null; printf "\r${RED} ❌ ${NC}%s\033[K\n" "$msg"; printf "\033[?25h"; exit 130' INT
+  set -- ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+  printf "\033[?25l"
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r${GREEN} %s ${NC} %s\033[K" "$1" "$msg"
+    set -- "$@" "$1"
+    shift
+    # Entware busybox умеет usleep; в остальных шеллах паузим на секунду
+    usleep 100000 2>/dev/null || sleep 1
+  done
+  printf "\033[?25h"
+  wait "$pid" && printf "\r ✔  %s\033[K\n" "$msg" || { printf "\r ❌ %s\033[K\n" "$msg"; return 1; }
+}
 
-curl -sSL "$URL" -o "$TMP_BIN"
-
-if [ ! -s "$TMP_BIN" ]; then
-    echo "[!] Ошибка: Не удалось скачать файл или скачанный файл пуст."
-    rm -f "$TMP_BIN"
+check_env() {
+  # Скрипт не интерактивен, поэтому спокойно запускается через curl | sh
+  case "$(uname -m)" in
+    aarch64|arm64) ;;
+    *) printf "${ERROR} Архитектура $(uname -m) не поддерживается: бинарь собран для arm64 (aarch64).${NCN}" >&2; exit 1 ;;
+  esac
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || {
+    printf "${ERROR} Не найден curl или wget. Установите: opkg update && opkg install curl${NCN}" >&2
     exit 1
-fi
+  }
+}
 
-mv "$TMP_BIN" "$TARGET_BIN"
-chmod +x "$TARGET_BIN"
+download_binary() {
+  (
+    set -e
+    tmp="$XKEENUI_BIN.new"
+    if command -v curl >/dev/null 2>&1; then
+      curl -kLsfo "$tmp" "$BIN_URL"
+    else
+      wget --no-check-certificate -qO "$tmp" "$BIN_URL"
+    fi
+    # Защита от HTML-страницы ошибки вместо бинарника: первые 4 байта — ELF-магия
+    magic=$(head -c 4 "$tmp" | od -An -tx1 | tr -d ' \n')
+    [ "$magic" = "7f454c46" ] || exit 1
+  ) &
+  if ! spinner $! "Загрузка бинарника XKeen UI..."; then
+    rm -f "$XKEENUI_BIN.new"
+    printf "${ERROR} Не удалось загрузить бинарник с GitHub.\nПроверьте интернет на роутере или повторите позже.\nУстановенная панель не тронута.${NCN}" >&2
+    exit 1
+  fi
+}
 
-# 3. Нативный init-скрипт Entware через start-stop-daemon
-INIT_SCRIPT="/opt/etc/init.d/S99xkeen-ui"
-echo "[+] Настройка автозапуска ($INIT_SCRIPT)..."
+apply_binary() {
+  # Загрузка прошла — только теперь останавливаем прежнюю версию и подменяем бинарь
+  (
+    if [ -f "$XKEENUI_INIT" ]; then
+      "$XKEENUI_INIT" stop >/dev/null 2>&1 || :
+    fi
+    killall -q -9 xkeen-ui 2>/dev/null || :
+    mv -f "$XKEENUI_BIN.new" "$XKEENUI_BIN"
+    chmod 755 "$XKEENUI_BIN"
+  ) &
+  if ! spinner $! "Замена бинарника..."; then
+    printf "${ERROR} Не удалось заменить бинарник.${NCN}" >&2
+    exit 1
+  fi
+}
 
-cat << 'INITEOT' > "$INIT_SCRIPT"
+create_init() {
+  mkdir -p /opt/etc/init.d /opt/sbin
+  cat << EOF > "$XKEENUI_INIT"
 #!/bin/sh
 
 ENABLED=yes
-PROG=/opt/sbin/xkeen-ui
-ARGS=""
+PROCS=xkeen-ui
+ARGS="-p $PORT"
 PREARGS=""
-DESC="XKeen-UI Service"
-PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
-START_OPTS="-b -m -p /opt/var/run/xkeen-ui.pid"
-STOP_OPTS="-p /opt/var/run/xkeen-ui.pid"
+DESC="\$PROCS"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 . /opt/etc/init.d/rc.func
-INITEOT
+EOF
+  chmod 755 "$XKEENUI_INIT"
+}
 
-chmod +x "$INIT_SCRIPT"
+start_panel() {
+  # автозапуск; при отсутствии rc.func (не Entware) — прямой запуск
+  ("$XKEENUI_INIT" start >/dev/null 2>&1 || "$XKEENUI_BIN" -p "$PORT" >/dev/null 2>&1 &) &
+  if ! spinner $! "Запуск XKeen UI..."; then
+    printf "${ERROR} Панель не запустилась. Смотрите лог: cat /opt/var/log/xkeen-ui.log${NCN}" >&2
+    exit 1
+  fi
+  # Дожидаемся, пока порт начнет отвечать (до 15с)
+  i=0
+  while [ $i -lt 15 ]; do
+    if nc -z 127.0.0.1 "$PORT" >/dev/null 2>&1; then break; fi
+    if wget -q -O /dev/null "http://127.0.0.1:$PORT/" 2>/dev/null; then break; fi
+    sleep 1
+    i=$((i+1))
+  done
+}
 
-# 4. Запуск утилиты через Entware rc.func
-echo "[+] Запуск XKeen-UI..."
-"$INIT_SCRIPT" start >/dev/null 2>&1
+finish() {
+  ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p' | head -1)
+  [ -n "$ip" ] || ip=$(ip -4 route 2>/dev/null | sed -n 's/.*src \([0-9.]*\).*/\1/p' | head -1)
+  [ -n "$ip" ] || ip=$(ifconfig br0 2>/dev/null | sed -n 's/.*inet addr:\([0-9.]*\).*/\1/p' | head -1)
 
-# 5. Определение IP роутера
-ROUTER_IP=$(ip addr show br0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
-if [ -z "$ROUTER_IP" ]; then
-    ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -n1)
-fi
-if [ -z "$ROUTER_IP" ]; then
-    ROUTER_IP="192.168.1.1"
-fi
+  printf "${SUCCESS} XKeen UI установлен и запущен!${NCN}"
+  if [ -n "$ip" ]; then
+    printf " Панель управления: ${GREEN_BOLD}"
+    # OSC 8 — кликабельная ссылка в любом современном терминале
+    printf '\033]8;;http://%s:%s\033\\http://%s:%s\033]8;;\033\\' "$ip" "$PORT" "$ip" "$PORT"
+    printf "${NC}\n"
+    printf " Если ссылка не кликается — скопируйте адрес: ${CYAN}http://%s:%s${NC}\n" "$ip" "$PORT"
+  else
+    printf " Панель управления: ${GREEN_BOLD}http://IP_РОУТЕРА:%s${NC}\n" "$PORT"
+  fi
+  printf "\n ${CYAN}ℹ️ ${NC}Автозапуск: ${YELLOW}$XKEENUI_INIT${NC}\n"
+  printf " ${CYAN}ℹ️ ${NC}Логи панели:   ${YELLOW}/opt/var/log/xkeen-ui.log${NC}\n"
+  printf " ${CYAN}ℹ️ ${NC}Остановка:    ${YELLOW}$XKEENUI_INIT stop${NC}\n\n"
+}
 
-PORT=1000
+clear 2>/dev/null || :
+printf "${CYAN}"
+cat <<'EOF'
+   _  __  __ __                       __  __ ____
+  | |/ / / //_/___   ___   ____      / / / //  _/
+ |   / / ,<  / _ \ / _ \ / __ \    / / / / / /
+/   | / /| |/  __//  __// / / /   / /_/ /_/ /
+/_/|_|/_/ |_|\___/ \___//_/ /_/    \____//___/
+EOF
+printf "${NC}"
+printf "Установка XKeen UI (сборка CSQTT/qWDTT) для Keenetic\n\n"
 
-echo ""
-echo "=================================================="
-echo "  [✓] Установка и запуск успешно завершены!"
-echo "=================================================="
-echo "  Веб-интерфейс доступен по адресу:"
-echo "  http://${ROUTER_IP}:${PORT}"
-echo "=================================================="
-echo ""
+check_env
+download_binary
+apply_binary
+create_init
+sync &
+spinner $! "Запись данных..."
+start_panel
+finish
