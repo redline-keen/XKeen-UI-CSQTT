@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-# 0. Принудительная остановка процесса и очистка
+# 0. Остановка процесса и полная очистка предыдущей установки
 echo "[+] Остановка и очистка предыдущей установки..."
 killall -9 xkeen-ui 2>/dev/null || true
 rm -f /opt/sbin/xkeen-ui /opt/sbin/xkeen-ui.tmp /opt/etc/init.d/S99xkeen-ui
@@ -27,7 +27,7 @@ case "$ARCH" in
         ;;
 esac
 
-# 2. Скачивание сразу в /opt/sbin (в обход /tmp)
+# 2. Загрузка бинарника напрямую в /opt/sbin
 URL="https://github.com/redline-keen/XKeen-UI-CSQTT/releases/download/1.0/xkeen-ui-${BIN_ARCH}"
 INSTALL_DIR="/opt/sbin"
 TARGET_BIN="$INSTALL_DIR/xkeen-ui"
@@ -47,7 +47,7 @@ fi
 mv "$TMP_BIN" "$TARGET_BIN"
 chmod +x "$TARGET_BIN"
 
-# 3. Создание скрипта автозапуска в Entware
+# 3. Создание скрипта автозапуска Entware
 INIT_SCRIPT="/opt/etc/init.d/S99xkeen-ui"
 echo "[+] Настройка автозапуска ($INIT_SCRIPT)..."
 
@@ -81,7 +81,7 @@ chmod +x "$INIT_SCRIPT"
 echo "[+] Запуск XKeen-UI..."
 "$INIT_SCRIPT" restart >/dev/null 2>&1
 
-# 5. Определение IP роутера и вывод информации
+# 5. Определение IP роутера
 ROUTER_IP=$(ip addr show br0 2>/dev/null | awk '/inet /{print $2}' | cut -d/ -f1 | head -n1)
 if [ -z "$ROUTER_IP" ]; then
     ROUTER_IP=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -n1)
@@ -96,7 +96,7 @@ echo ""
 echo "=================================================="
 echo "  [✓] Установка и запуск успешно завершены!"
 echo "=================================================="
-echo "  Веб-интерфейс доступен по адресу:"
+echo "  Откройте браузер и перейдите по ссылке:"
 echo "  http://${ROUTER_IP}:${PORT}"
 echo "=================================================="
 echo ""
