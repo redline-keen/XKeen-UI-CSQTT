@@ -49,7 +49,7 @@ get_arch() {
 
 download_files() {
   local base_url="https://github.com/redline-keen/XKeen-UI-CSQTT/releases"
-  local download_url="$base_url/download/1.0"
+  local download_url="$base_url/download/1.1"
   local bin_name="xkeen-ui-$ARCH"
 
   if [ "$BETA" = true ]; then
@@ -225,11 +225,7 @@ clear
 get_arch
 printf "${CYAN}"
 cat <<'EOF'
-   _  __  __ __                       __  __ ____
-  | |/ / / //_/___   ___   ____      / / / //  _/
-  |   / / ,<  / _ \ / _ \ / __ \    / / / / / /
- /   | / /| |/  __//  __// / / /   / /_/ /_/ /
-/_/|_|/_/ |_|\___/ \___//_/ /_/    \____//___/
+XKEEN-UI-CSQTT-WDTT
 EOF
 
 printf "${NC}\n$(get_status)\n"
