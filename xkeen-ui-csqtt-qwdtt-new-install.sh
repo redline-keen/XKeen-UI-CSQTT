@@ -1,0 +1,259 @@
+#!/bin/sh
+
+GREEN=$'\033[32m'
+GREEN_BOLD=$'\033[1;32m'
+RED=$'\033[31m'
+RED_BOLD=$'\033[1;31m'
+NC=$'\033[0m'
+NCN="$NC\n\n"
+BLUE=$'\033[1;34m'
+YELLOW=$'\033[1;33m'
+CYAN=$'\033[1;96m'
+
+ERROR="\n${RED} ❌${RED_BOLD}"
+SUCCESS="\n${GREEN} ✅${GREEN_BOLD}"
+INFO="\n${CYAN} ℹ️ "
+
+XKEENUI_BIN="/opt/sbin/xkeen-ui"
+XKEENUI_INIT="/opt/etc/init.d/S99xkeen-ui"
+STATIC_DIR="/opt/share/www/XKeen-UI"
+LIGHTTPD_INIT="/opt/etc/init.d/S80lighttpd"
+LIGHTTPD_DIR="/opt/etc/lighttpd"
+LIGHTTPD_CONF="$LIGHTTPD_DIR/conf.d/90-xkeenui.conf"
+
+BETA=false
+LOCAL=false
+[ "$1" = "beta" ] && BETA=true
+
+spinner() {
+  local pid=$1 msg=$2
+  trap 'kill "$pid" 2>/dev/null; printf "\r${RED} ❌ ${NC}%s\033[K\n" "$msg"; printf "\033[?25h"; return 130' INT
+  set -- ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+  printf "\033[?25l"
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r${GREEN} %s ${NC} %s\033[K" "$1" "$msg"
+    set -- "$@" "$1"
+    shift
+    usleep 100000
+  done
+  printf "\033[?25h"
+  wait "$pid" && printf "\r ✔  %s\033[K\n" "$msg" || { printf "\r ❌ %s\033[K\n" "$msg"; return 1; }
+}
+
+get_arch() {
+  local raw_arch
+  raw_arch=$(opkg print-architecture 2>/dev/null)
+  
+  if [ -z "$raw_arch" ]; then
+    raw_arch=$(uname -m)
+  fi
+
+  case "$raw_arch" in
+    *aarch64*|*arm64*|*armv8*) ARCH='arm64' ;;
+    *armv7*|*arm*)             ARCH='armv7' ;;
+    *x86_64*|*amd64*)          ARCH='amd64' ;;
+    *) 
+      printf "${RED_BOLD}\n Неподдерживаемая архитектура системы: %s${NCN}" "$raw_arch" >&2
+      exit 1 
+      ;;
+  esac
+}
+
+download_files() {
+  local base_url="https://github.com/redline-keen/XKeen-UI-CSQTT/releases"
+  local download_url="$base_url/download/1.1"
+  local bin_name="xkeen-ui-$ARCH"
+
+  if [ "$BETA" = true ]; then
+    local beta_tag="/tmp/xkeen_beta"
+    trap "rm -f $beta_tag" EXIT
+    (curl -s https://api.github.com/repos/redline-keen/XKeen-UI-CSQTT/releases | \
+  jq -re '.[0] | select(.prerelease == true) | .tag_name' > $beta_tag) &
+    if ! spinner $! "Поиск бета-релиза..."; then
+      printf "${RED_BOLD}\n Нет актуального бета-релиза${NCN}"
+      $XKEENUI_INIT start &>/dev/null || :
+      exit 1
+    fi
+    beta_tag=$(cat $beta_tag)
+    download_url="$base_url/download/$beta_tag"
+  fi
+
+  if [ "$LOCAL" = true ] && [ -f "/opt/tmp/$bin_name" ]; then
+    ( set -e; mv "/opt/tmp/$bin_name" $XKEENUI_BIN && chmod +x $XKEENUI_BIN ) &
+    if ! spinner $! "Локальная установка бинарника..."; then
+      printf "${RED_BOLD}\n Не удалось переместить бинарник.${NCN}"
+      exit 1
+    fi
+  else
+    ( set -e; curl -Lsfo $XKEENUI_BIN $download_url/$bin_name && chmod +x $XKEENUI_BIN ) &
+    if ! spinner $! "Загрузка бинарника..."; then
+      printf "${RED_BOLD}\n Не удалось загрузить бинарник.${NCN}"
+      exit 1
+    fi
+  fi
+}
+
+install_xkeenui() {
+  if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
+    printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
+    uninstall_xkeenui
+  fi
+
+  printf "${INFO} Начинаем установку...${NCN}"
+
+  [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
+
+  download_files; create_xkeenui_init
+
+  sync & spinner $! "Запись данных..."
+
+  $XKEENUI_INIT start &>/dev/null &
+  if ! spinner $! "Запуск XKeen UI..."; then
+    printf "${RED_BOLD}\n Не удалось запустить XKeen UI.${NCN}"
+    exit 1
+  fi
+
+  finish_setup "установлен"
+}
+
+update_xkeenui() {
+  [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
+
+  printf "${INFO} Начинаем обновление...${NCN}"
+
+  if [ ! -f $XKEENUI_INIT ]; then
+    (
+      set -e
+      killall -q -9 xkeen-ui &>/dev/null || :
+      create_xkeenui_init
+    ) &
+    spinner $! "Создание скрипта запуска..."
+  elif pidof xkeen-ui &>/dev/null; then
+    (
+      sed -i 's|^PROCS=/opt/sbin/xkeen-ui$|PROCS=xkeen-ui|' /opt/etc/init.d/S99xkeen-ui
+      $XKEENUI_INIT stop &>/dev/null || :
+      killall -q -9 xkeen-ui || :
+    ) &
+    spinner $! "Остановка XKeen UI..."
+  else
+    sed -i 's|^PROCS=/opt/sbin/xkeen-ui$|PROCS=xkeen-ui|' /opt/etc/init.d/S99xkeen-ui
+  fi
+
+  legacy_installation_check; download_files
+
+  sync & spinner $! "Запись данных..."
+
+  $XKEENUI_INIT start &>/dev/null &
+  if ! spinner $! "Запуск XKeen UI..."; then
+    printf "${RED_BOLD}\n Не удалось запустить XKeen UI.${NCN}"
+    exit 1
+  fi
+
+  finish_setup "обновлен"
+}
+
+uninstall_xkeenui() {
+  printf "\n Данное действие ${RED_BOLD}удалит${NC} XKeen UI, его файлы и зависимости.\n\n"
+  read -p " Продолжить? [y/N]: " response < /dev/tty
+  response=$(printf '%s' "$response" | tr -cd 'YyNn')
+  case "$response" in
+    [Yy]) printf "${INFO} Начинаем удаление...${NCN}";;
+    *) printf "${ERROR} Отмена операции.${NCN}"; exit 1;;
+  esac
+
+  (
+    if [[ -f "$LIGHTTPD_INIT" && -f "$LIGHTTPD_CONF" ]]; then
+      if $LIGHTTPD_INIT status &>/dev/null; then
+          $LIGHTTPD_INIT stop &>/dev/null || :
+          opkg remove --autoremove --force-removal-of-dependent-packages lighttpd &>/dev/null
+          rm -rf $LIGHTTPD_DIR
+      fi
+    fi
+    if [ -f $XKEENUI_INIT ]; then
+      if $XKEENUI_INIT status &>/dev/null; then
+        $XKEENUI_INIT stop &>/dev/null || :
+        killall -q -9 xkeen-ui || :
+      fi
+    fi
+  ) &
+  spinner $! "Остановка XKeen UI..."
+
+  (rm -rf $STATIC_DIR; rm -f $XKEENUI_BIN $XKEENUI_INIT) &
+  spinner $! "Удаление файлов XKeen UI..."
+  printf "${SUCCESS} Удаление XKeen-UI завершено${NCN}"
+}
+
+finish_setup() {
+  local ip=$(ip -4 a s br0 2>/dev/null | sed -n 's/.*inet \([0-9.]*\).*/\1/p'); ip=${ip:-"IP_Роутера"}
+  local port=$(sed -n 's/.*-p \([0-9]*\).*/\1/p' $XKEENUI_INIT 2>/dev/null); port=${port:-1000}
+
+  printf "${SUCCESS} XKeen UI успешно $1!${NCN}"
+  printf " Панель доступна по адресу: ${GREEN_BOLD}http://$ip:$port${NC}\n\n"
+}
+
+legacy_installation_check() {
+  if [ -f "$LIGHTTPD_CONF" ]; then
+    $LIGHTTPD_INIT status &>/dev/null && $LIGHTTPD_INIT stop
+    rm -f "$LIGHTTPD_CONF"
+    printf "${YELLOW}\n Веб-сервер lighttpd для работы XKeen UI более не используется.\n${NC}"
+    read -p " Удалить его? [Y/n]: " response < /dev/tty
+    response=$(printf '%s' "$response" | tr -cd 'YyNn')
+    case "$response" in
+      [Nn]) return;;
+      *) opkg remove --autoremove --force-removal-of-dependent-packages lighttpd; rm -rf $LIGHTTPD_DIR;;
+    esac
+  fi
+}
+
+create_xkeenui_init() {
+  cat << EOF > $XKEENUI_INIT
+#!/bin/sh
+
+ENABLED=yes
+PROCS=xkeen-ui
+ARGS="-p 1000"
+PREARGS=""
+DESC="\$PROCS"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func
+EOF
+  chmod +x $XKEENUI_INIT
+}
+
+get_status() {
+  [ ! -f "$XKEENUI_BIN" ] && printf "Статус панели: ${RED_BOLD}не установлена${NC}" && return
+
+  local version=$($XKEENUI_BIN -v 2>/dev/null | awk 'NR==1{print $3}')
+  local status="${RED_BOLD}не запущена"
+
+  version=${version:-"N/A"}
+
+  pidof xkeen-ui &>/dev/null && status="${GREEN_BOLD}запущена"
+  printf "Статус панели: $status ${NC}[$version]"
+}
+
+clear
+get_arch
+printf "${CYAN}"
+cat <<'EOF'
+XKEEN-UI-CSQTT-WDTT
+EOF
+
+printf "${NC}\n$(get_status)\n"
+printf "Архитектура: ${GREEN_BOLD}$ARCH\n"
+printf "\nДобро пожаловать! Выберите действие:${NCN}"
+printf "  1. Установить/переустановить\n"
+printf "  2. Обновить\n"
+printf "  3. Удалить\n"
+printf "\n  0. Выйти\n\n"
+
+read -p "${GREEN_BOLD}>: ${NC}" response < /dev/tty
+
+case $response in
+  1) install_xkeenui;;
+  2) update_xkeenui;;
+  3) uninstall_xkeenui;;
+  0) echo; exit;;
+  *) printf "${ERROR} Неверный выбор.${NCN}"; exit 1;;
+esac
