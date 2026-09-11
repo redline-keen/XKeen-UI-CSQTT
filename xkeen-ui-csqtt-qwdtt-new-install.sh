@@ -63,7 +63,7 @@ get_arch_from_elf() {
     "3e00"|"003e") echo "amd64" ;;
     "0800"|"0008")
       if [ "$endianness" = "01" ]; then
-        echo "mipsel"
+        echo "mips32le"
       else
         echo "mips"
       fi
@@ -73,16 +73,17 @@ get_arch_from_elf() {
 }
 
 get_arch() {
-  # 1. Попытка определить архитектуру из существующего бинарника
+  # 1. Попытка определить архитектуру из существующего бинарника или локального файла
   if [ -f "$XKEENUI_BIN" ]; then
     ARCH=$(get_arch_from_elf "$XKEENUI_BIN")
   elif [ -f "/opt/tmp/xkeen-ui-arm64" ]; then ARCH="arm64"
-  elif [ -f "/opt/tmp/xkeen-ui-mipsel" ]; then ARCH="mipsel"
+  elif [ -f "/opt/tmp/xkeen-ui-mips32le" ]; then ARCH="mips32le"
+  elif [ -f "/opt/tmp/xkeen-ui-mipsel" ]; then ARCH="mips32le"
   elif [ -f "/opt/tmp/xkeen-ui-armv7" ]; then ARCH="armv7"
   elif [ -f "/opt/tmp/xkeen-ui-amd64" ]; then ARCH="amd64"
   fi
 
-  # 2. Если бинарника нет, опрашиваем opkg или system uname
+  # 2. Определение через opkg / system uname
   if [ -z "$ARCH" ]; then
     local raw_arch
     raw_arch=$(opkg print-architecture 2>/dev/null | tail -n 1 | awk '{print $2}')
@@ -91,7 +92,7 @@ get_arch() {
     case "$raw_arch" in
       *aarch64*|*arm64*|*armv8*) ARCH='arm64' ;;
       *armv7*|*arm*)             ARCH='armv7' ;;
-      *mipsel*|*mips32le*)       ARCH='mipsel' ;;
+      *mipsel*|*mips32le*)       ARCH='mips32le' ;; # Маппинг под имя файла mips32le
       *mips*)                    ARCH='mips' ;;
       *x86_64*|*amd64*)          ARCH='amd64' ;;
       *)
