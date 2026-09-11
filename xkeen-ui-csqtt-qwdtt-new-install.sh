@@ -40,23 +40,66 @@ spinner() {
   wait "$pid" && printf "\r ✔  %s\033[K\n" "$msg" || { printf "\r ❌ %s\033[K\n" "$msg"; return 1; }
 }
 
-get_arch() {
-  local raw_arch
-  raw_arch=$(opkg print-architecture 2>/dev/null)
-  
-  if [ -z "$raw_arch" ]; then
-    raw_arch=$(uname -m)
+# Чтение архитектуры напрямую из ELF-заголовка бинарника
+get_arch_from_elf() {
+  local file="$1"
+  [ ! -f "$file" ] && return 1
+
+  local hex_dump=""
+  if command -v hexdump >/dev/null 2>&1; then
+    hex_dump=$(dd if="$file" bs=1 skip=4 count=15 2>/dev/null | hexdump -e '15/1 "%02x"')
+  elif command -v od >/dev/null 2>&1; then
+    hex_dump=$(dd if="$file" bs=1 skip=4 count=15 2>/dev/null | od -An -tx1 | tr -d ' \n')
   fi
 
-  case "$raw_arch" in
-    *aarch64*|*arm64*|*armv8*) ARCH='arm64' ;;
-    *armv7*|*arm*)             ARCH='armv7' ;;
-    *x86_64*|*amd64*)          ARCH='amd64' ;;
-    *) 
-      printf "${RED_BOLD}\n Неподдерживаемая архитектура системы: %s${NCN}" "$raw_arch" >&2
-      exit 1 
+  [ -z "$hex_dump" ] && return 1
+
+  local endianness="${hex_dump:0:2}"
+  local machine="${hex_dump:26:4}"
+
+  case "$machine" in
+    "b700"|"00b7") echo "arm64" ;;
+    "2800"|"0028") echo "armv7" ;;
+    "3e00"|"003e") echo "amd64" ;;
+    "0800"|"0008")
+      if [ "$endianness" = "01" ]; then
+        echo "mipsel"
+      else
+        echo "mips"
+      fi
       ;;
+    *) return 1 ;;
   esac
+}
+
+get_arch() {
+  # 1. Попытка определить архитектуру из существующего бинарника
+  if [ -f "$XKEENUI_BIN" ]; then
+    ARCH=$(get_arch_from_elf "$XKEENUI_BIN")
+  elif [ -f "/opt/tmp/xkeen-ui-arm64" ]; then ARCH="arm64"
+  elif [ -f "/opt/tmp/xkeen-ui-mipsel" ]; then ARCH="mipsel"
+  elif [ -f "/opt/tmp/xkeen-ui-armv7" ]; then ARCH="armv7"
+  elif [ -f "/opt/tmp/xkeen-ui-amd64" ]; then ARCH="amd64"
+  fi
+
+  # 2. Если бинарника нет, опрашиваем opkg или system uname
+  if [ -z "$ARCH" ]; then
+    local raw_arch
+    raw_arch=$(opkg print-architecture 2>/dev/null | tail -n 1 | awk '{print $2}')
+    [ -z "$raw_arch" ] && raw_arch=$(uname -m)
+
+    case "$raw_arch" in
+      *aarch64*|*arm64*|*armv8*) ARCH='arm64' ;;
+      *armv7*|*arm*)             ARCH='armv7' ;;
+      *mipsel*|*mips32le*)       ARCH='mipsel' ;;
+      *mips*)                    ARCH='mips' ;;
+      *x86_64*|*amd64*)          ARCH='amd64' ;;
+      *)
+        printf "${RED_BOLD}\n Неподдерживаемая архитектура системы: %s${NCN}" "$raw_arch" >&2
+        exit 1
+        ;;
+    esac
+  fi
 }
 
 download_files() {
