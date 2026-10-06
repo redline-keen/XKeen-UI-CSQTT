@@ -105,7 +105,7 @@ get_arch() {
 
 download_files() {
   local base_url="https://github.com/redline-keen/XKeen-UI-CSQTT/releases"
-  local download_url="$base_url/download/1.4"
+  local download_url="$base_url/download/1.5"
   local bin_name="xkeen-ui-$ARCH"
 
   if [ "$BETA" = true ]; then
